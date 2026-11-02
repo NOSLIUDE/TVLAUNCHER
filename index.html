@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android TV IPTV Launcher</title>
+    <title>Android TV IPTV Launcher - Xtream & M3U Parser</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -26,7 +26,7 @@
 
         /* Sidebar / Perfis e Arquivos */
         .sidebar {
-            width: 300px;
+            width: 320px;
             background-color: #181818;
             border-right: 2px solid #2a2a2a;
             display: flex;
@@ -37,7 +37,7 @@
 
         .sidebar h2 {
             font-size: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             color: var(--focus-color);
         }
 
@@ -77,7 +77,7 @@
             flex-grow: 1;
             display: flex;
             flex-direction: column;
-            padding: 30px;
+            padding: 25px;
             box-sizing: border-box;
         }
 
@@ -148,6 +148,8 @@
         .placeholder-text {
             color: var(--text-secondary);
             font-size: 18px;
+            text-align: center;
+            padding: 20px;
         }
     </style>
 </head>
@@ -157,116 +159,231 @@
     <div class="sidebar">
         <h2>TV Launcher</h2>
         <div style="margin-bottom: 15px;">
-            <input type="file" id="m3uFileLoader" accept=".m3u,.txt" style="display: none;" onchange="loadM3UFile(event)">
-            <button class="item" style="width: 100%; text-align: center; background-color: var(--focus-color); color: #000; font-weight: bold;" onclick="document.getElementById('m3uFileLoader').click()" tabindex="0">Carregar Lista M3U / TXT</button>
+            <input type="file" id="fileLoader" accept=".txt,.m3u" style="display: none;" onchange="handleFileSelect(event)">
+            <button class="item" style="width: 100%; text-align: center; background-color: var(--focus-color); color: #000; font-weight: bold;" onclick="document.getElementById('fileLoader').click()" tabindex="0">Carregar Arquivo TXT / M3U</button>
         </div>
-        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Perfis / Histórico:</div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Perfis de Listas Carregadas:</div>
         <ul id="profileList" class="profile-list">
-            <li class="item" tabindex="0">Nenhuma lista carregada</li>
+            <li class="item" tabindex="0">Nenhum perfil ativo</li>
         </ul>
     </div>
 
     <!-- Conteúdo Principal -->
     <div class="main-content">
         <div class="header">
-            <h1 id="currentProfileTitle" style="margin: 0; font-size: 22px;">Aguardando Lista de Canais</h1>
+            <h1 id="currentProfileTitle" style="margin: 0; font-size: 22px;">Selecione ou carregue uma lista</h1>
         </div>
 
         <!-- Abas de Categorias -->
         <div id="categoryTabs">
-            <button class="tab-item active" tabindex="0">Geral</button>
+            <button class="tab-item active" tabindex="0">Todas</button>
         </div>
 
         <div class="content-grid">
             <!-- Lista de Canais -->
             <div class="channels-container">
                 <ul id="channelList" class="channel-list">
-                    <li class="item" tabindex="0">Carregue um arquivo para exibir os canais...</li>
+                    <li class="item" tabindex="0">Aguardando seleção de perfil...</li>
                 </ul>
             </div>
 
             <!-- Player de Vídeo -->
             <div class="player-container">
-                <div id="placeholder" class="placeholder-text">Selecione um canal para reproduzir</div>
+                <div id="placeholder" class="placeholder-text">Selecione um canal para iniciar a transmissão</div>
                 <video id="tvPlayer" controls style="display: none;"></video>
             </div>
         </div>
     </div>
 
     <script>
+        let profiles = [];
         let allChannels = [];
         let groupedData = {};
-        let activeCategory = "Geral";
+        let activeCategory = "Todas";
 
-        // 1. Parser de Arquivo M3U / TXT Bruto
-        function parseM3U(m3uContent) {
-            const lines = m3uContent.split(/\r?\n/);
-            const channels = [];
-            let currentChannel = null;
-
-            for (let i = 0; i < lines.length; i++) {
-                let line = lines[i].trim();
-
-                if (line.startsWith('#EXTINF:')) {
-                    currentChannel = {};
-                    const commaIndex = line.lastIndexOf(',');
-                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
-
-                    const logoMatch = line.match(/tvg-logo="([^"]*)"/);
-                    currentChannel.logo = logoMatch ? logoMatch[1] : '';
-
-                    const groupMatch = line.match(/group-title="([^"]*)"/);
-                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
-                } else if (line && !line.startsWith('#')) {
-                    if (currentChannel) {
-                        currentChannel.url = line;
-                        channels.push(currentChannel);
-                        currentChannel = null;
-                    } else if (line.startsWith('http')) {
-                        // Caso seja um TXT simples apenas com URLs
-                        channels.push({
-                            name: `Canal ${channels.length + 1}`,
-                            url: line,
-                            group: 'Listas TXT'
-                        });
-                    }
-                }
-            }
-            return channels;
-        }
-
-        // 2. Carregar e Processar Arquivo
-        function loadM3UFile(event) {
+        // 1. Processador Geral de Arquivos TXT / M3U
+        function handleFileSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
             reader.onload = function(e) {
                 const rawContent = e.target.result;
-                allChannels = parseM3U(rawContent);
-
-                if (allChannels.length === 0) {
-                    alert("Nenhum canal encontrado ou formato inválido.");
-                    return;
-                }
-
-                document.getElementById('currentProfileTitle').innerText = file.name;
-                
-                // Atualiza perfil na barra lateral
-                document.getElementById('profileList').innerHTML = `<li class="item" tabindex="0">📁 ${file.name} (${allChannels.length} canais)</li>`;
-
-                // Agrupa e renderiza categorias
-                groupedData = groupChannelsByCategory(allChannels);
-                const categoryNames = Object.keys(groupedData);
-                activeCategory = categoryNames[0] || "Geral";
-
-                renderTabs(categoryNames);
-                renderChannelsForCategory(activeCategory);
+                parseTxtContent(rawContent, file.name);
             };
             reader.readAsText(file);
         }
 
-        // 3. Agrupar por Categorias
+        // 2. Parser inteligente de conteúdo TXT (Xtream / M3U / Links Diretos)
+        function parseTxtContent(content, fileName) {
+            const lines = content.split(/\r?\n/);
+            profiles = [];
+            let isM3u = content.includes('#EXTINF');
+
+            if (isM3u) {
+                // Caso seja formato M3U padrão
+                allChannels = parseM3U(content);
+                profiles.push({
+                    name: fileName,
+                    type: 'm3u',
+                    channels: allChannels
+                });
+                renderProfiles();
+                selectProfile(0);
+                return;
+            }
+
+            // Caso seja um TXT com credenciais Xtream em texto puro ou URLs
+            let profileCount = 1;
+            lines.forEach(line => {
+                line = line.trim();
+                if (!line || line.startsWith('#')) return;
+
+                let xtreamMatch = parseXtreamLine(line);
+                if (xtreamMatch) {
+                    profiles.push({
+                        name: `Xtream Profile ${profileCount} (${xtreamMatch.host})`,
+                        type: 'xtream',
+                        server: xtreamMatch.server,
+                        user: xtreamMatch.user,
+                        pass: xtreamMatch.pass
+                    });
+                    profileCount++;
+                } else if (line.startsWith('http')) {
+                    // Lista M3U via URL remota
+                    profiles.push({
+                        name: `URL M3U ${profileCount}`,
+                        type: 'm3u_url',
+                        url: line
+                    });
+                    profileCount++;
+                }
+            });
+
+            if (profiles.length === 0) {
+                alert("Nenhuma credencial Xtream válida ou link M3U encontrado no arquivo TXT.");
+                return;
+            }
+
+            renderProfiles();
+            selectProfile(0); // Seleciona o primeiro perfil por padrão
+        }
+
+        // 3. Identificador de Formatos Xtream Codes em Texto Puro
+        function parseXtreamLine(line) {
+            // Suporta Formato 1: http://servidor.com:8080/get.php?username=USER&password=PASS
+            // Suporta Formato 2: http://servidor.com:8080/live/USER/PASS/1.ts
+            // Suporta Formato 3: http://servidor.com:8080|USER|PASS
+            // Suporta Formato 4: http://servidor.com:8080 / USER / PASS (Com espaços ou barras)
+
+            if (line.includes('|')) {
+                let parts = line.split('|');
+                if (parts.length >= 3) {
+                    return { server: parts[0].trim(), user: parts[1].trim(), pass: parts[2].trim(), host: cleanHost(parts[0]) };
+                }
+            }
+
+            if (line.includes('username=') && line.includes('password=')) {
+                try {
+                    let urlObj = new URL(line);
+                    let server = `${urlObj.protocol}//${urlObj.host}`;
+                    let user = urlObj.searchParams.get('username');
+                    let pass = urlObj.searchParams.get('password');
+                    if (user && pass) {
+                        return { server, user, pass, host: urlObj.host };
+                    }
+                } catch (e) {}
+            }
+
+            // Expressão Regular para pegar links no formato: http://servidor.com:8080/user/pass ou /live/user/pass
+            let regex = /(https?:\/\/[^\/]+)\/(?:live\/)?([^\/]+)\/([^\/\s]+)/;
+            let match = line.match(regex);
+            if (match) {
+                return {
+                    server: match[1],
+                    user: match[2],
+                    pass: match[3],
+                    host: cleanHost(match[1])
+                };
+            }
+
+            return null;
+        }
+
+        function cleanHost(url) {
+            return url.replace('http://', '').replace('https://', '').split(':')[0];
+        }
+
+        // 4. Renderizar Perfis Encontrados
+        function renderProfiles() {
+            const profileListEl = document.getElementById('profileList');
+            profileListEl.innerHTML = '';
+
+            profiles.forEach((profile, index) => {
+                let li = document.createElement('li');
+                li.className = 'item';
+                li.tabIndex = 0;
+                li.innerText = `👤 ${profile.name}`;
+                li.onclick = () => selectProfile(index);
+                profileListEl.appendChild(li);
+            });
+        }
+
+        // 5. Selecionar Perfil e Carregar Conteúdo (API Xtream ou Canais)
+        async function selectProfile(index) {
+            const profile = profiles[index];
+            document.getElementById('currentProfileTitle').innerText = profile.name;
+            document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Carregando dados da API...</li>';
+
+            if (profile.type === 'xtream') {
+                await fetchXtreamChannels(profile);
+            } else if (profile.type === 'm3u') {
+                allChannels = profile.channels;
+                processChannelsData();
+            } else if (profile.type === 'm3u_url') {
+                try {
+                    let res = await fetch(profile.url);
+                    let text = await res.text();
+                    allChannels = parseM3U(text);
+                    processChannelsData();
+                } catch (err) {
+                    alert("Erro ao buscar a lista M3U da URL.");
+                }
+            }
+        }
+
+        // 6. Chamada à API Nativa Xtream Codes (player_api.php)
+        async function fetchXtreamChannels(profile) {
+            const apiUrl = `${profile.server}/player_api.php?username=${profile.user}&password=${profile.pass}&action=get_live_streams`;
+            try {
+                let response = await fetch(apiUrl);
+                let streams = await response.json();
+
+                allChannels = streams.map(item => ({
+                    name: item.name,
+                    url: `${profile.server}/live/${profile.user}/${profile.pass}/${item.stream_id}.ts`,
+                    group: item.category_name || "Canais Xtream",
+                    logo: item.stream_icon
+                }));
+
+                processChannelsData();
+            } catch (err) {
+                console.error("Erro na API Xtream:", err);
+                // Fallback: se a API player_api estiver desativada, tenta reproduzir o stream direto
+                document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro de conexão com o servidor Xtream.</li>';
+            }
+        }
+
+        // 7. Organização de Canais e Categorias
+        function processChannelsData() {
+            groupedData = groupChannelsByCategory(allChannels);
+            const categoryNames = Object.keys(groupedData);
+            activeCategory = categoryNames[0] || "Todas";
+
+            renderTabs(categoryNames);
+            renderChannelsForCategory(activeCategory);
+        }
+
         function groupChannelsByCategory(channels) {
             const categories = {};
             channels.forEach(channel => {
@@ -277,7 +394,6 @@
             return categories;
         }
 
-        // 4. Renderizar Abas de Categorias
         function renderTabs(categories) {
             const tabsContainer = document.getElementById('categoryTabs');
             tabsContainer.innerHTML = '';
@@ -297,7 +413,6 @@
             });
         }
 
-        // 5. Renderizar Canais da Categoria Ativa
         function renderChannelsForCategory(category) {
             const channelListEl = document.getElementById('channelList');
             channelListEl.innerHTML = '';
@@ -318,7 +433,7 @@
             });
         }
 
-        // 6. Executar Vídeo no Player
+        // 8. Executar Vídeo no Player
         function playStream(url) {
             const video = document.getElementById('tvPlayer');
             const placeholder = document.getElementById('placeholder');
@@ -329,11 +444,36 @@
             video.src = url;
             video.play().catch(err => {
                 console.error("Erro ao reproduzir stream:", err);
-                alert("O navegador pode não suportar o formato de vídeo deste canal (ex: fluxos .ts puros sem extensão HLS).");
+                alert("O navegador da TV pode exigir a biblioteca HLS.js para reproduzir fluxos .ts ou .m3u8.");
             });
         }
 
-        // 7. Navegação por Controle Remoto (DPAD / Setas)
+        // 9. Parser de M3U Secundário
+        function parseM3U(m3uContent) {
+            const lines = m3uContent.split(/\r?\n/);
+            const channels = [];
+            let currentChannel = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (line.startsWith('#EXTINF:')) {
+                    currentChannel = {};
+                    const commaIndex = line.lastIndexOf(',');
+                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
+                    const groupMatch = line.match(/group-title="([^"]*)"/);
+                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
+                } else if (line && !line.startsWith('#')) {
+                    if (currentChannel) {
+                        currentChannel.url = line;
+                        channels.push(currentChannel);
+                        currentChannel = null;
+                    }
+                }
+            }
+            return channels;
+        }
+
+        // 10. Navegação por Controle Remoto (DPAD / Setas)
         document.addEventListener('keydown', function(event) {
             const activeElement = document.activeElement;
             const key = event.key;
