@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android TV IPTV Launcher - Xtream & M3U Parser</title>
+    <title>Android TV IPTV Launcher - Native get.php Parser</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -214,18 +214,18 @@
             reader.readAsText(file);
         }
 
-        // 2. Parser inteligente de conteúdo TXT (Xtream / M3U / Links Diretos)
+        // 2. Parser inteligente de conteúdo TXT (get.php, M3U URLs, Xtream)
         function parseTxtContent(content, fileName) {
             const lines = content.split(/\r?\n/);
             profiles = [];
-            let isM3u = content.includes('#EXTINF');
+            let profileCount = 1;
 
-            if (isM3u) {
-                // Caso seja formato M3U padrão
+            // Se o arquivo for diretamente um .m3u ou contiver tags estendidas
+            if (content.includes('#EXTINF')) {
                 allChannels = parseM3U(content);
                 profiles.push({
                     name: fileName,
-                    type: 'm3u',
+                    type: 'm3u_direct',
                     channels: allChannels
                 });
                 renderProfiles();
@@ -233,26 +233,38 @@
                 return;
             }
 
-            // Caso seja um TXT com credenciais Xtream em texto puro ou URLs
-            let profileCount = 1;
+            // Lê linha por linha do TXT
             lines.forEach(line => {
                 line = line.trim();
                 if (!line || line.startsWith('#')) return;
 
-                let xtreamMatch = parseXtreamLine(line);
-                if (xtreamMatch) {
+                // Suporte nativo a links get.php (Ex: tutor-ins.online/get.php?username=...&password=...)
+                if (line.includes('get.php') && line.includes('username=') && line.includes('password=')) {
                     profiles.push({
-                        name: `Xtream Profile ${profileCount} (${xtreamMatch.host})`,
-                        type: 'xtream',
-                        server: xtreamMatch.server,
-                        user: xtreamMatch.user,
-                        pass: xtreamMatch.pass
+                        name: `Lista get.php [${profileCount}]`,
+                        type: 'm3u_url',
+                        url: line
                     });
                     profileCount++;
-                } else if (line.startsWith('http')) {
-                    // Lista M3U via URL remota
+                } 
+                // Formato Xtream Tradicional (Server|User|Pass)
+                else if (line.includes('|')) {
+                    let parts = line.split('|');
+                    if (parts.length >= 3) {
+                        profiles.push({
+                            name: `Xtream [${profileCount}]`,
+                            type: 'xtream',
+                            server: parts[0].trim(),
+                            user: parts[1].trim(),
+                            pass: parts[2].trim()
+                        });
+                        profileCount++;
+                    }
+                } 
+                // URLs M3U padrão diretas
+                else if (line.startsWith('http')) {
                     profiles.push({
-                        name: `URL M3U ${profileCount}`,
+                        name: `URL M3U [${profileCount}]`,
                         type: 'm3u_url',
                         url: line
                     });
@@ -261,60 +273,15 @@
             });
 
             if (profiles.length === 0) {
-                alert("Nenhuma credencial Xtream válida ou link M3U encontrado no arquivo TXT.");
+                alert("Nenhum link get.php, M3U ou Xtream válido encontrado no arquivo TXT.");
                 return;
             }
 
             renderProfiles();
-            selectProfile(0); // Seleciona o primeiro perfil por padrão
+            selectProfile(0);
         }
 
-        // 3. Identificador de Formatos Xtream Codes em Texto Puro
-        function parseXtreamLine(line) {
-            // Suporta Formato 1: http://servidor.com:8080/get.php?username=USER&password=PASS
-            // Suporta Formato 2: http://servidor.com:8080/live/USER/PASS/1.ts
-            // Suporta Formato 3: http://servidor.com:8080|USER|PASS
-            // Suporta Formato 4: http://servidor.com:8080 / USER / PASS (Com espaços ou barras)
-
-            if (line.includes('|')) {
-                let parts = line.split('|');
-                if (parts.length >= 3) {
-                    return { server: parts[0].trim(), user: parts[1].trim(), pass: parts[2].trim(), host: cleanHost(parts[0]) };
-                }
-            }
-
-            if (line.includes('username=') && line.includes('password=')) {
-                try {
-                    let urlObj = new URL(line);
-                    let server = `${urlObj.protocol}//${urlObj.host}`;
-                    let user = urlObj.searchParams.get('username');
-                    let pass = urlObj.searchParams.get('password');
-                    if (user && pass) {
-                        return { server, user, pass, host: urlObj.host };
-                    }
-                } catch (e) {}
-            }
-
-            // Expressão Regular para pegar links no formato: http://servidor.com:8080/user/pass ou /live/user/pass
-            let regex = /(https?:\/\/[^\/]+)\/(?:live\/)?([^\/]+)\/([^\/\s]+)/;
-            let match = line.match(regex);
-            if (match) {
-                return {
-                    server: match[1],
-                    user: match[2],
-                    pass: match[3],
-                    host: cleanHost(match[1])
-                };
-            }
-
-            return null;
-        }
-
-        function cleanHost(url) {
-            return url.replace('http://', '').replace('https://', '').split(':')[0];
-        }
-
-        // 4. Renderizar Perfis Encontrados
+        // 3. Renderizar Perfis Encontrados na Sidebar
         function renderProfiles() {
             const profileListEl = document.getElementById('profileList');
             profileListEl.innerHTML = '';
@@ -329,15 +296,15 @@
             });
         }
 
-        // 5. Selecionar Perfil e Carregar Conteúdo (API Xtream ou Canais)
+        // 4. Selecionar Perfil e Carregar Canais
         async function selectProfile(index) {
             const profile = profiles[index];
             document.getElementById('currentProfileTitle').innerText = profile.name;
-            document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Carregando dados da API...</li>';
+            document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Carregando canais...</li>';
 
             if (profile.type === 'xtream') {
                 await fetchXtreamChannels(profile);
-            } else if (profile.type === 'm3u') {
+            } else if (profile.type === 'm3u_direct') {
                 allChannels = profile.channels;
                 processChannelsData();
             } else if (profile.type === 'm3u_url') {
@@ -347,12 +314,13 @@
                     allChannels = parseM3U(text);
                     processChannelsData();
                 } catch (err) {
-                    alert("Erro ao buscar a lista M3U da URL.");
+                    console.error("Erro ao buscar M3U remota:", err);
+                    document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro ao carregar URL (CORS ou link inválido).</li>';
                 }
             }
         }
 
-        // 6. Chamada à API Nativa Xtream Codes (player_api.php)
+        // 5. Consumir API Xtream Codes (Caso aplicável)
         async function fetchXtreamChannels(profile) {
             const apiUrl = `${profile.server}/player_api.php?username=${profile.user}&password=${profile.pass}&action=get_live_streams`;
             try {
@@ -368,13 +336,11 @@
 
                 processChannelsData();
             } catch (err) {
-                console.error("Erro na API Xtream:", err);
-                // Fallback: se a API player_api estiver desativada, tenta reproduzir o stream direto
                 document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro de conexão com o servidor Xtream.</li>';
             }
         }
 
-        // 7. Organização de Canais e Categorias
+        // 6. Organização de Canais e Categorias
         function processChannelsData() {
             groupedData = groupChannelsByCategory(allChannels);
             const categoryNames = Object.keys(groupedData);
@@ -433,7 +399,7 @@
             });
         }
 
-        // 8. Executar Vídeo no Player
+        // 7. Executar Vídeo no Player
         function playStream(url) {
             const video = document.getElementById('tvPlayer');
             const placeholder = document.getElementById('placeholder');
@@ -444,72 +410,4 @@
             video.src = url;
             video.play().catch(err => {
                 console.error("Erro ao reproduzir stream:", err);
-                alert("O navegador da TV pode exigir a biblioteca HLS.js para reproduzir fluxos .ts ou .m3u8.");
-            });
-        }
-
-        // 9. Parser de M3U Secundário
-        function parseM3U(m3uContent) {
-            const lines = m3uContent.split(/\r?\n/);
-            const channels = [];
-            let currentChannel = null;
-
-            for (let i = 0; i < lines.length; i++) {
-                let line = lines[i].trim();
-                if (line.startsWith('#EXTINF:')) {
-                    currentChannel = {};
-                    const commaIndex = line.lastIndexOf(',');
-                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
-                    const groupMatch = line.match(/group-title="([^"]*)"/);
-                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
-                } else if (line && !line.startsWith('#')) {
-                    if (currentChannel) {
-                        currentChannel.url = line;
-                        channels.push(currentChannel);
-                        currentChannel = null;
-                    }
-                }
-            }
-            return channels;
-        }
-
-        // 10. Navegação por Controle Remoto (DPAD / Setas)
-        document.addEventListener('keydown', function(event) {
-            const activeElement = document.activeElement;
-            const key = event.key;
-
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
-                event.preventDefault();
-
-                // Foco nas Abas de Categorias (Horizontal)
-                if (activeElement.classList.contains('tab-item')) {
-                    if (key === 'ArrowRight' && activeElement.nextElementSibling) {
-                        activeElement.nextElementSibling.focus();
-                    } else if (key === 'ArrowLeft' && activeElement.previousElementSibling) {
-                        activeElement.previousElementSibling.focus();
-                    } else if (key === 'ArrowDown') {
-                        const firstChannel = document.querySelector('#channelList .item');
-                        if (firstChannel) firstChannel.focus();
-                    }
-                }
-                // Foco na Lista de Canais (Vertical)
-                else if (activeElement.classList.contains('item') && activeElement.closest('#channelList')) {
-                    if (key === 'ArrowDown' && activeElement.nextElementSibling) {
-                        activeElement.nextElementSibling.focus();
-                    } else if (key === 'ArrowUp') {
-                        if (activeElement.previousElementSibling) {
-                            activeElement.previousElementSibling.focus();
-                        } else {
-                            const activeTab = document.querySelector('.tab-item.active') || document.querySelector('.tab-item');
-                            if (activeTab) activeTab.focus();
-                        }
-                    } else if (key === 'ArrowLeft') {
-                        const activeTab = document.querySelector('.tab-item.active') || document.querySelector('.tab-item');
-                        if (activeTab) activeTab.focus();
-                    }
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+                alert("O navegador da TV pode exigir suporte a HLS ou codec específico para reproduzir este canal
