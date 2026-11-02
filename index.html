@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android TV IPTV Launcher - Native get.php Parser</title>
+    <title>Android TV IPTV Launcher - Xtream & get.php Parser</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -214,7 +214,7 @@
             reader.readAsText(file);
         }
 
-        // 2. Parser inteligente de conteúdo TXT (get.php, M3U URLs, Xtream)
+        // 2. Parser inteligente de conteúdo TXT (Xtream API, get.php, M3U URLs)
         function parseTxtContent(content, fileName) {
             const lines = content.split(/\r?\n/);
             profiles = [];
@@ -238,30 +238,71 @@
                 line = line.trim();
                 if (!line || line.startsWith('#')) return;
 
-                // Suporte nativo a links get.php (Ex: tutor-ins.online/get.php?username=...&password=...)
+                // 1. Detecta formato API Xtream (player_api.php)
+                if (line.includes('player_api.php') && line.includes('username=') && line.includes('password=')) {
+                    try {
+                        let urlObj = new URL(line);
+                        let server = `${urlObj.protocol}//${urlObj.host}`;
+                        let user = urlObj.searchParams.get('username');
+                        let pass = urlObj.searchParams.get('password');
+                        if (user && pass) {
+                            profiles.push({
+                                name: `Xtream API [${profileCount}]`,
+                                type: 'xtream_api',
+                                server: server,
+                                user: user,
+                                pass: pass
+                            });
+                            profileCount++;
+                            return;
+                        }
+                    } catch (e) {}
+                }
+
+                // 2. Detecta formato get.php (ex: tutor-ins.online/get.php?username=...&password=...)
                 if (line.includes('get.php') && line.includes('username=') && line.includes('password=')) {
+                    try {
+                        let urlObj = new URL(line);
+                        let server = `${urlObj.protocol}//${urlObj.host}`;
+                        let user = urlObj.searchParams.get('username');
+                        let pass = urlObj.searchParams.get('password');
+                        
+                        if (user && pass) {
+                            profiles.push({
+                                name: `Xtream (get.php) [${profileCount}]`,
+                                type: 'xtream_api',
+                                server: server,
+                                user: user,
+                                pass: pass
+                            });
+                            profileCount++;
+                            return;
+                        }
+                    } catch (e) {}
+
+                    // Fallback para URL M3U caso falhe a extração
                     profiles.push({
-                        name: `Lista get.php [${profileCount}]`,
+                        name: `Lista M3U [${profileCount}]`,
                         type: 'm3u_url',
                         url: line
                     });
                     profileCount++;
                 } 
-                // Formato Xtream Tradicional (Server|User|Pass)
+                // 3. Formato Xtream Tradicional com Pipe (Server|User|Pass)
                 else if (line.includes('|')) {
                     let parts = line.split('|');
                     if (parts.length >= 3) {
                         profiles.push({
-                            name: `Xtream [${profileCount}]`,
-                            type: 'xtream',
-                            server: parts[0].trim(),
+                            name: `Xtream Pipe [${profileCount}]`,
+                            type: 'xtream_api',
+                            server: parts[0].trim().replace(/\/$/, ''),
                             user: parts[1].trim(),
                             pass: parts[2].trim()
                         });
                         profileCount++;
                     }
                 } 
-                // URLs M3U padrão diretas
+                // 4. URLs M3U padrão diretas
                 else if (line.startsWith('http')) {
                     profiles.push({
                         name: `URL M3U [${profileCount}]`,
@@ -273,7 +314,7 @@
             });
 
             if (profiles.length === 0) {
-                alert("Nenhum link get.php, M3U ou Xtream válido encontrado no arquivo TXT.");
+                alert("Nenhum link Xtream ou M3U válido encontrado no arquivo TXT.");
                 return;
             }
 
@@ -302,7 +343,7 @@
             document.getElementById('currentProfileTitle').innerText = profile.name;
             document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Carregando canais...</li>';
 
-            if (profile.type === 'xtream') {
+            if (profile.type === 'xtream_api') {
                 await fetchXtreamChannels(profile);
             } else if (profile.type === 'm3u_direct') {
                 allChannels = profile.channels;
@@ -320,7 +361,7 @@
             }
         }
 
-        // 5. Consumir API Xtream Codes (Caso aplicável)
+        // 5. Consumir API Xtream Codes
         async function fetchXtreamChannels(profile) {
             const apiUrl = `${profile.server}/player_api.php?username=${profile.user}&password=${profile.pass}&action=get_live_streams`;
             try {
@@ -363,51 +404,3 @@
         function renderTabs(categories) {
             const tabsContainer = document.getElementById('categoryTabs');
             tabsContainer.innerHTML = '';
-
-            categories.forEach(category => {
-                let btn = document.createElement('button');
-                btn.className = `tab-item ${category === activeCategory ? 'active' : ''}`;
-                btn.innerText = `${category} (${groupedData[category].length})`;
-                btn.tabIndex = 0;
-                btn.onclick = () => {
-                    activeCategory = category;
-                    document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
-                    btn.classList.add('active');
-                    renderChannelsForCategory(category);
-                };
-                tabsContainer.appendChild(btn);
-            });
-        }
-
-        function renderChannelsForCategory(category) {
-            const channelListEl = document.getElementById('channelList');
-            channelListEl.innerHTML = '';
-
-            const channels = groupedData[category] || [];
-            if (channels.length === 0) {
-                channelListEl.innerHTML = '<li class="item" tabindex="0">Nenhum canal nesta categoria</li>';
-                return;
-            }
-
-            channels.forEach((channel) => {
-                let li = document.createElement('li');
-                li.className = 'item';
-                li.tabIndex = 0;
-                li.innerText = channel.name;
-                li.onclick = () => playStream(channel.url);
-                channelListEl.appendChild(li);
-            });
-        }
-
-        // 7. Executar Vídeo no Player
-        function playStream(url) {
-            const video = document.getElementById('tvPlayer');
-            const placeholder = document.getElementById('placeholder');
-
-            placeholder.style.display = 'none';
-            video.style.display = 'block';
-
-            video.src = url;
-            video.play().catch(err => {
-                console.error("Erro ao reproduzir stream:", err);
-                alert("O navegador da TV pode exigir suporte a HLS ou codec específico para reproduzir este canal
