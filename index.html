@@ -24,7 +24,7 @@
             display: flex;
         }
 
-        /* Sidebar / Profiles */
+        /* Sidebar / Perfis e Arquivos */
         .sidebar {
             width: 300px;
             background-color: #181818;
@@ -55,7 +55,7 @@
             background-color: var(--card-bg);
             border-radius: 6px;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
             font-size: 14px;
             white-space: nowrap;
             overflow: hidden;
@@ -63,14 +63,16 @@
             border: 2px solid transparent;
         }
 
-        .item:focus, .item.selected {
-            background-color: #2c2c2c;
-            border-color: var(--focus-color);
-            outline: none;
-            transform: scale(1.02);
+        /* Foco Universal para Controle Remoto (DPAD) */
+        .item:focus, .tab-item:focus {
+            outline: none !important;
+            border-color: var(--focus-color) !important;
+            background-color: #2c2c2c !important;
+            box-shadow: 0 0 10px rgba(0, 188, 212, 0.5);
+            transform: scale(1.03);
         }
 
-        /* Main Content Area */
+        /* Conteúdo Principal */
         .main-content {
             flex-grow: 1;
             display: flex;
@@ -83,23 +85,40 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
 
-        .upload-box {
+        /* Abas de Categorias */
+        #categoryTabs {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
+            white-space: nowrap;
+        }
+
+        .tab-item {
             background-color: var(--card-bg);
-            padding: 10px 15px;
-            border-radius: 6px;
-            border: 1px dashed var(--focus-color);
+            color: var(--text-secondary);
+            border: 2px solid transparent;
+            padding: 8px 15px;
+            border-radius: 4px;
             cursor: pointer;
             font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .tab-item.active {
+            color: #fff;
+            border-color: var(--focus-color);
         }
 
         .content-grid {
             display: flex;
             gap: 20px;
             flex-grow: 1;
-            height: calc(100vh - 100px);
+            height: calc(100vh - 150px);
         }
 
         .channels-container {
@@ -134,31 +153,35 @@
 </head>
 <body>
 
-    <!-- Barra Lateral: Perfites & Listas do TXT -->
+    <!-- Barra Lateral: Carregamento de Lista M3U ou TXT -->
     <div class="sidebar">
-        <h2>Perfis IPTV</h2>
+        <h2>TV Launcher</h2>
         <div style="margin-bottom: 15px;">
-            <input type="file" id="txtFileLoader" accept=".txt" style="display: none;" onchange="loadTxtFile(event)">
-            <button class="item" style="width: 100%; text-align: center; background-color: var(--focus-color); color: #000; font-weight: bold;" onclick="document.getElementById('txtFileLoader').click()">Carregar TXT de Listas</button>
+            <input type="file" id="m3uFileLoader" accept=".m3u,.txt" style="display: none;" onchange="loadM3UFile(event)">
+            <button class="item" style="width: 100%; text-align: center; background-color: var(--focus-color); color: #000; font-weight: bold;" onclick="document.getElementById('m3uFileLoader').click()" tabindex="0">Carregar Lista M3U / TXT</button>
         </div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Perfis / Histórico:</div>
         <ul id="profileList" class="profile-list">
-            <li class="item" tabindex="0">Nenhum perfil carregado</li>
+            <li class="item" tabindex="0">Nenhuma lista carregada</li>
         </ul>
     </div>
 
-    <!-- Conteúdo Principal: Lista de Canais e Player -->
+    <!-- Conteúdo Principal -->
     <div class="main-content">
         <div class="header">
-            <h1 id="currentProfileTitle" style="margin: 0; font-size: 24px;">Selecione um Perfil</h1>
-            <div class="upload-box">GitHub TV Launcher v1.0</div>
+            <h1 id="currentProfileTitle" style="margin: 0; font-size: 22px;">Aguardando Lista de Canais</h1>
+        </div>
+
+        <!-- Abas de Categorias -->
+        <div id="categoryTabs">
+            <button class="tab-item active" tabindex="0">Geral</button>
         </div>
 
         <div class="content-grid">
             <!-- Lista de Canais -->
             <div class="channels-container">
-                <h3 style="margin-top: 0; color: var(--text-secondary);">Canais / Streams</h3>
                 <ul id="channelList" class="channel-list">
-                    <li class="item" tabindex="0">Aguardando dados...</li>
+                    <li class="item" tabindex="0">Carregue um arquivo para exibir os canais...</li>
                 </ul>
             </div>
 
@@ -171,100 +194,131 @@
     </div>
 
     <script>
-        let profilesData = [];
-        let currentChannels = [];
+        let allChannels = [];
+        let groupedData = {};
+        let activeCategory = "Geral";
 
-        // Função para processar arquivo TXT enviado pelo usuário
-        function loadTxtFile(event) {
+        // 1. Parser de Arquivo M3U / TXT Bruto
+        function parseM3U(m3uContent) {
+            const lines = m3uContent.split(/\r?\n/);
+            const channels = [];
+            let currentChannel = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+
+                if (line.startsWith('#EXTINF:')) {
+                    currentChannel = {};
+                    const commaIndex = line.lastIndexOf(',');
+                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
+
+                    const logoMatch = line.match(/tvg-logo="([^"]*)"/);
+                    currentChannel.logo = logoMatch ? logoMatch[1] : '';
+
+                    const groupMatch = line.match(/group-title="([^"]*)"/);
+                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
+                } else if (line && !line.startsWith('#')) {
+                    if (currentChannel) {
+                        currentChannel.url = line;
+                        channels.push(currentChannel);
+                        currentChannel = null;
+                    } else if (line.startsWith('http')) {
+                        // Caso seja um TXT simples apenas com URLs
+                        channels.push({
+                            name: `Canal ${channels.length + 1}`,
+                            url: line,
+                            group: 'Listas TXT'
+                        });
+                    }
+                }
+            }
+            return channels;
+        }
+
+        // 2. Carregar e Processar Arquivo
+        function loadM3UFile(event) {
             const file = event.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
             reader.onload = function(e) {
-                const lines = e.target.result.split('\n');
-                profilesData = [];
-                let profileCount = 1;
+                const rawContent = e.target.result;
+                allChannels = parseM3U(rawContent);
 
-                lines.forEach(line => {
-                    line = line.trim();
-                    if (!line) return;
+                if (allChannels.length === 0) {
+                    alert("Nenhum canal encontrado ou formato inválido.");
+                    return;
+                }
 
-                    let profile = { id: profileCount, name: `Perfil ${profileCount}`, type: '', url: '', server: '', user: '', pass: '' };
+                document.getElementById('currentProfileTitle').innerText = file.name;
+                
+                // Atualiza perfil na barra lateral
+                document.getElementById('profileList').innerHTML = `<li class="item" tabindex="0">📁 ${file.name} (${allChannels.length} canais)</li>`;
 
-                    if (line.includes('|')) {
-                        // Formato Xtream: Server|User|Pass
-                        let parts = line.split('|');
-                        profile.type = 'xtream';
-                        profile.server = parts[0];
-                        profile.user = parts[1];
-                        profile.pass = parts[2];
-                        profile.name = `Xtream [${profileCount}]`;
-                    } else if (line.startsWith('http')) {
-                        // Formato M3U Direto
-                        profile.type = 'm3u';
-                        profile.url = line;
-                        profile.name = `M3U List [${profileCount}]`;
-                    }
+                // Agrupa e renderiza categorias
+                groupedData = groupChannelsByCategory(allChannels);
+                const categoryNames = Object.keys(groupedData);
+                activeCategory = categoryNames[0] || "Geral";
 
-                    profilesData.push(profile);
-                    profileCount++;
-                });
-
-                renderProfiles();
+                renderTabs(categoryNames);
+                renderChannelsForCategory(activeCategory);
             };
             reader.readAsText(file);
         }
 
-        // Renderizar Perfis na Tela
-        function renderProfiles() {
-            const listEl = document.getElementById('profileList');
-            listEl.innerHTML = '';
+        // 3. Agrupar por Categorias
+        function groupChannelsByCategory(channels) {
+            const categories = {};
+            channels.forEach(channel => {
+                const group = channel.group || "Geral";
+                if (!categories[group]) categories[group] = [];
+                categories[group].push(channel);
+            });
+            return categories;
+        }
 
-            if (profilesData.length === 0) {
-                listEl.innerHTML = '<li class="item">Nenhuma lista válida encontrada</li>';
-                return;
-            }
+        // 4. Renderizar Abas de Categorias
+        function renderTabs(categories) {
+            const tabsContainer = document.getElementById('categoryTabs');
+            tabsContainer.innerHTML = '';
 
-            profilesData.forEach((profile, index) => {
-                let li = document.createElement('li');
-                li.className = 'item';
-                li.tabIndex = 0;
-                li.innerText = profile.name;
-                li.onclick = () => selectProfile(index);
-                listEl.appendChild(li);
+            categories.forEach(category => {
+                let btn = document.createElement('button');
+                btn.className = `tab-item ${category === activeCategory ? 'active' : ''}`;
+                btn.innerText = `${category} (${groupedData[category].length})`;
+                btn.tabIndex = 0;
+                btn.onclick = () => {
+                    activeCategory = category;
+                    document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+                    btn.classList.add('active');
+                    renderChannelsForCategory(category);
+                };
+                tabsContainer.appendChild(btn);
             });
         }
 
-        // Selecionar Perfil e Simular Carregamento de Canais
-        function selectProfile(index) {
-            const profile = profilesData[index];
-            document.getElementById('currentProfileTitle').innerText = profile.name;
-
-            // Simulação de carregamento de canais (Se for Xtream, puxaria via API fetch)
-            currentChannels = [
-                { name: "Canal Exemplo 1 (HD)", streamUrl: profile.type === 'm3u' ? profile.url : `${profile.server}/live/${profile.user}/${profile.pass}/1.ts` },
-                { name: "Canal Exemplo 2 (FHD)", streamUrl: profile.type === 'm3u' ? profile.url : `${profile.server}/live/${profile.user}/${profile.pass}/2.ts` }
-            ];
-
-            renderChannels();
-        }
-
-        // Renderizar Canais
-        function renderChannels() {
+        // 5. Renderizar Canais da Categoria Ativa
+        function renderChannelsForCategory(category) {
             const channelListEl = document.getElementById('channelList');
             channelListEl.innerHTML = '';
 
-            currentChannels.forEach((channel) => {
+            const channels = groupedData[category] || [];
+            if (channels.length === 0) {
+                channelListEl.innerHTML = '<li class="item" tabindex="0">Nenhum canal nesta categoria</li>';
+                return;
+            }
+
+            channels.forEach((channel) => {
                 let li = document.createElement('li');
                 li.className = 'item';
                 li.tabIndex = 0;
                 li.innerText = channel.name;
-                li.onclick = () => playStream(channel.streamUrl);
+                li.onclick = () => playStream(channel.url);
                 channelListEl.appendChild(li);
             });
         }
 
-        // Executar Stream no Player
+        // 6. Executar Vídeo no Player
         function playStream(url) {
             const video = document.getElementById('tvPlayer');
             const placeholder = document.getElementById('placeholder');
@@ -275,9 +329,47 @@
             video.src = url;
             video.play().catch(err => {
                 console.error("Erro ao reproduzir stream:", err);
-                alert("Erro ao reproduzir o fluxo. Verifique se o servidor suporta reprodução via navegador.");
+                alert("O navegador pode não suportar o formato de vídeo deste canal (ex: fluxos .ts puros sem extensão HLS).");
             });
         }
+
+        // 7. Navegação por Controle Remoto (DPAD / Setas)
+        document.addEventListener('keydown', function(event) {
+            const activeElement = document.activeElement;
+            const key = event.key;
+
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(key)) {
+                event.preventDefault();
+
+                // Foco nas Abas de Categorias (Horizontal)
+                if (activeElement.classList.contains('tab-item')) {
+                    if (key === 'ArrowRight' && activeElement.nextElementSibling) {
+                        activeElement.nextElementSibling.focus();
+                    } else if (key === 'ArrowLeft' && activeElement.previousElementSibling) {
+                        activeElement.previousElementSibling.focus();
+                    } else if (key === 'ArrowDown') {
+                        const firstChannel = document.querySelector('#channelList .item');
+                        if (firstChannel) firstChannel.focus();
+                    }
+                }
+                // Foco na Lista de Canais (Vertical)
+                else if (activeElement.classList.contains('item') && activeElement.closest('#channelList')) {
+                    if (key === 'ArrowDown' && activeElement.nextElementSibling) {
+                        activeElement.nextElementSibling.focus();
+                    } else if (key === 'ArrowUp') {
+                        if (activeElement.previousElementSibling) {
+                            activeElement.previousElementSibling.focus();
+                        } else {
+                            const activeTab = document.querySelector('.tab-item.active') || document.querySelector('.tab-item');
+                            if (activeTab) activeTab.focus();
+                        }
+                    } else if (key === 'ArrowLeft') {
+                        const activeTab = document.querySelector('.tab-item.active') || document.querySelector('.tab-item');
+                        if (activeTab) activeTab.focus();
+                    }
+                }
+            }
+        });
     </script>
 </body>
 </html>
