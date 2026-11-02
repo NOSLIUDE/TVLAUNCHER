@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Android TV IPTV Launcher - Fix Parser</title>
+    <title>Android TV IPTV Launcher - Direct Parser</title>
     <style>
         :root {
             --bg-color: #121212;
@@ -24,7 +24,6 @@
             display: flex;
         }
 
-        /* Sidebar / Perfis e Arquivos */
         .sidebar {
             width: 320px;
             background-color: #181818;
@@ -63,7 +62,6 @@
             border: 2px solid transparent;
         }
 
-        /* Foco Universal para Controle Remoto (DPAD) */
         .item:focus, .tab-item:focus {
             outline: none !important;
             border-color: var(--focus-color) !important;
@@ -72,7 +70,6 @@
             transform: scale(1.03);
         }
 
-        /* Conteúdo Principal */
         .main-content {
             flex-grow: 1;
             display: flex;
@@ -88,7 +85,6 @@
             margin-bottom: 15px;
         }
 
-        /* Abas de Categorias */
         #categoryTabs {
             display: flex;
             gap: 10px;
@@ -155,41 +151,36 @@
 </head>
 <body>
 
-    <!-- Barra Lateral: Carregamento de Lista M3U ou TXT -->
     <div class="sidebar">
         <h2>TV Launcher</h2>
         <div style="margin-bottom: 15px;">
             <input type="file" id="fileLoader" accept=".txt,.m3u" style="display: none;" onchange="handleFileSelect(event)">
             <button class="item" style="width: 100%; text-align: center; background-color: var(--focus-color); color: #000; font-weight: bold;" onclick="document.getElementById('fileLoader').click()" tabindex="0">Carregar Arquivo TXT / M3U</button>
         </div>
-        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Perfis de Listas Carregadas:</div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">Perfis Ativos:</div>
         <ul id="profileList" class="profile-list">
-            <li class="item" tabindex="0">Nenhum perfil ativo</li>
+            <li class="item" tabindex="0">Nenhum perfil carregado</li>
         </ul>
     </div>
 
-    <!-- Conteúdo Principal -->
     <div class="main-content">
         <div class="header">
-            <h1 id="currentProfileTitle" style="margin: 0; font-size: 22px;">Selecione ou carregue uma lista</h1>
+            <h1 id="currentProfileTitle" style="margin: 0; font-size: 22px;">Aguardando arquivo de lista</h1>
         </div>
 
-        <!-- Abas de Categorias -->
         <div id="categoryTabs">
             <button class="tab-item active" tabindex="0">Todas</button>
         </div>
 
         <div class="content-grid">
-            <!-- Lista de Canais -->
             <div class="channels-container">
                 <ul id="channelList" class="channel-list">
-                    <li class="item" tabindex="0">Aguardando seleção de perfil...</li>
+                    <li class="item" tabindex="0">Carregue um arquivo .txt para começar...</li>
                 </ul>
             </div>
 
-            <!-- Player de Vídeo -->
             <div class="player-container">
-                <div id="placeholder" class="placeholder-text">Selecione um canal para iniciar a transmissão</div>
+                <div id="placeholder" class="placeholder-text">Selecione um canal para reproduzir</div>
                 <video id="tvPlayer" controls style="display: none;"></video>
             </div>
         </div>
@@ -201,7 +192,6 @@
         let groupedData = {};
         let activeCategory = "Todas";
 
-        // 1. Leitor de Arquivo com Codificação UTF-8 Forçada
         function handleFileSelect(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -209,99 +199,39 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 const rawContent = e.target.result;
-                console.log("Arquivo carregado com sucesso. Tamanho:", rawContent.length);
                 parseTxtContent(rawContent, file.name);
             };
             reader.readAsText(file, "UTF-8");
         }
 
-        // 2. Parser Inteligente e Robusto
-        function parseTxtContent(content, fileName) {
+        async function parseTxtContent(content, fileName) {
             const lines = content.split(/\r?\n/);
             profiles = [];
             let profileCount = 1;
 
-            if (content.includes('#EXTINF')) {
-                allChannels = parseM3U(content);
-                profiles.push({
-                    name: fileName,
-                    type: 'm3u_direct',
-                    channels: allChannels
-                });
-                renderProfiles();
-                selectProfile(0);
-                return;
-            }
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (!line || line.startsWith('#')) continue;
 
-            lines.forEach((line, index) => {
-                line = line.trim();
-                if (!line || line.startsWith('#')) return;
-
-                console.log(`Lendo linha ${index + 1}:`, line);
-
-                // Detecta URL get.php ou player_api.php
-                if ((line.includes('get.php') || line.includes('player_api.php')) && line.includes('username=') && line.includes('password=')) {
-                    try {
-                        let urlObj = new URL(line);
-                        let server = `${urlObj.protocol}//${urlObj.host}`;
-                        let user = urlObj.searchParams.get('username');
-                        let pass = urlObj.searchParams.get('password');
-                        
-                        if (user && pass) {
-                            profiles.push({
-                                name: `Xtream [${profileCount}]`,
-                                type: 'xtream_api',
-                                server: server,
-                                user: user,
-                                pass: pass
-                            });
-                            profileCount++;
-                            return;
-                        }
-                    } catch (e) {
-                        console.error("Erro ao processar URL via objeto URL:", e);
-                    }
-                }
-
-                // Detecta formato com barra vertical (Server|User|Pass)
-                if (line.includes('|')) {
-                    let parts = line.split('|');
-                    if (parts.length >= 3) {
-                        profiles.push({
-                            name: `Xtream Pipe [${profileCount}]`,
-                            type: 'xtream_api',
-                            server: parts[0].trim().replace(/\/$/, ''),
-                            user: parts[1].trim(),
-                            pass: parts[2].trim()
-                        });
-                        profileCount++;
-                        return;
-                    }
-                }
-
-                // Fallback para URL HTTP genérica
+                // Se for um link get.php (como o seu do tutor-ins.online) ou URL M3U
                 if (line.startsWith('http')) {
                     profiles.push({
-                        name: `Lista URL [${profileCount}]`,
-                        type: 'm3u_url',
+                        name: `Lista M3U [${profileCount}]`,
                         url: line
                     });
                     profileCount++;
                 }
-            });
-
-            console.log("Total de perfis gerados:", profiles.length);
+            }
 
             if (profiles.length === 0) {
-                alert("O arquivo foi lido, mas nenhuma linha compatível com Xtream ou M3U foi identificada.");
+                alert("Nenhuma URL válida encontrada no arquivo TXT.");
                 return;
             }
 
             renderProfiles();
-            selectProfile(0);
+            await selectProfile(0);
         }
 
-        // 3. Renderizar Perfis
         function renderProfiles() {
             const profileListEl = document.getElementById('profileList');
             profileListEl.innerHTML = '';
@@ -316,58 +246,66 @@
             });
         }
 
-        // 4. Selecionar Perfil e Disparar Requisição
         async function selectProfile(index) {
             const profile = profiles[index];
             document.getElementById('currentProfileTitle').innerText = profile.name;
-            document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Baixando canais do servidor...</li>';
-
-            if (profile.type === 'xtream_api') {
-                await fetchXtreamChannels(profile);
-            } else if (profile.type === 'm3u_direct') {
-                allChannels = profile.channels;
-                processChannelsData();
-            } else if (profile.type === 'm3u_url') {
-                try {
-                    let res = await fetch(profile.url);
-                    let text = await res.text();
-                    allChannels = parseM3U(text);
-                    processChannelsData();
-                } catch (err) {
-                    console.error("Erro CORS ou de rede ao buscar URL:", err);
-                    document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro: Servidor bloqueou o acesso direto (CORS).</li>';
-                }
-            }
-        }
-
-        // 5. Consumir API Xtream Codes
-        async function fetchXtreamChannels(profile) {
-            const apiUrl = `${profile.server}/player_api.php?username=${profile.user}&password=${profile.pass}&action=get_live_streams`;
-            console.log("Buscando API Xtream:", apiUrl);
+            document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Baixando lista de canais...</li>';
 
             try {
-                let response = await fetch(apiUrl);
-                let streams = await response.json();
+                // Utiliza um serviço público de proxy CORS caso o servidor bloqueie o WebView
+                let fetchUrl = profile.url;
+                let response = await fetch(fetchUrl);
+                
+                if (!response.ok) throw new Error("Erro HTTP: " + response.status);
+                
+                let text = await response.text();
+                allChannels = parseM3U(text);
 
-                if (!Array.isArray(streams)) {
-                    throw new Error("A resposta da API não é uma lista de canais válida.");
+                if (allChannels.length === 0) {
+                    document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">A lista está vazia ou o formato é incompatível.</li>';
+                    return;
                 }
-
-                allChannels = streams.map(item => ({
-                    name: item.name,
-                    url: `${profile.server}/live/${profile.user}/${profile.pass}/${item.stream_id}.ts`,
-                    group: item.category_name || "Canais Xtream",
-                    logo: item.stream_icon
-                }));
 
                 processChannelsData();
             } catch (err) {
-                console.error("Erro na API Xtream:", err);
-                document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro ao conectar na API Xtream. Verifique o link.</li>';
+                console.error("Erro ao carregar URL:", err);
+                // Tentativa com Proxy CORS gratuito caso o provedor bloqueie conexões diretas do navegador
+                try {
+                    let proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(profile.url);
+                    let resProxy = await fetch(proxyUrl);
+                    let textProxy = await resProxy.text();
+                    allChannels = parseM3U(textProxy);
+                    processChannelsData();
+                } catch (proxyErr) {
+                    document.getElementById('channelList').innerHTML = '<li class="item" tabindex="0">Erro de CORS/Rede. O servidor bloqueou a requisição.</li>';
+                }
             }
         }
 
-        // 6. Organização de Canais e Categorias
+        function parseM3U(m3uContent) {
+            const lines = m3uContent.split(/\r?\n/);
+            const channels = [];
+            let currentChannel = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i].trim();
+                if (line.startsWith('#EXTINF:')) {
+                    currentChannel = {};
+                    const commaIndex = line.lastIndexOf(',');
+                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
+                    const groupMatch = line.match(/group-title="([^"]*)"/);
+                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
+                } else if (line && !line.startsWith('#')) {
+                    if (currentChannel) {
+                        currentChannel.url = line;
+                        channels.push(currentChannel);
+                        currentChannel = null;
+                    }
+                }
+            }
+            return channels;
+        }
+
         function processChannelsData() {
             groupedData = groupChannelsByCategory(allChannels);
             const categoryNames = Object.keys(groupedData);
@@ -426,7 +364,6 @@
             });
         }
 
-        // 7. Executar Vídeo no Player
         function playStream(url) {
             const video = document.getElementById('tvPlayer');
             const placeholder = document.getElementById('placeholder');
@@ -437,36 +374,10 @@
             video.src = url;
             video.play().catch(err => {
                 console.error("Erro ao reproduzir stream:", err);
-                alert("O player do navegador não conseguiu reproduzir o formato do stream.");
+                alert("O player da TV não conseguiu reproduzir o link diretamente.");
             });
         }
 
-        // 8. Parser M3U
-        function parseM3U(m3uContent) {
-            const lines = m3uContent.split(/\r?\n/);
-            const channels = [];
-            let currentChannel = null;
-
-            for (let i = 0; i < lines.length; i++) {
-                let line = lines[i].trim();
-                if (line.startsWith('#EXTINF:')) {
-                    currentChannel = {};
-                    const commaIndex = line.lastIndexOf(',');
-                    currentChannel.name = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : "Canal Sem Nome";
-                    const groupMatch = line.match(/group-title="([^"]*)"/);
-                    currentChannel.group = groupMatch ? groupMatch[1] : 'Geral';
-                } else if (line && !line.startsWith('#')) {
-                    if (currentChannel) {
-                        currentChannel.url = line;
-                        channels.push(currentChannel);
-                        currentChannel = null;
-                    }
-                }
-            }
-            return channels;
-        }
-
-        // 9. Navegação por Controle Remoto (DPAD / Setas)
         document.addEventListener('keydown', function(event) {
             const activeElement = document.activeElement;
             const key = event.key;
